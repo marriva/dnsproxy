@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetUpstreamsForDomain(t *testing.T) {
+func TestGetUpstreamsForDomain_radix(t *testing.T) {
 	upstreams := []string{
 		"[/google.com/local/]4.3.2.1",
 		"[/www.google.com//]1.2.3.4",
@@ -25,6 +25,7 @@ func TestGetUpstreamsForDomain(t *testing.T) {
 			Timeout:            1 * time.Second,
 		},
 	)
+	config.GetUpstreamsMode = GetUpstreamsFromRadixTree
 	require.NoError(t, err)
 
 	assertUpstreamsForDomain(t, config, "www.google.com.", []string{"1.2.3.4:53", "tls://1.1.1.1:853"})
@@ -34,7 +35,7 @@ func TestGetUpstreamsForDomain(t *testing.T) {
 	assertUpstreamsForDomain(t, config, "maps.google.com.", []string{})
 }
 
-func TestGetUpstreamsForDomainWithoutDuplicates(t *testing.T) {
+func TestGetUpstreamsForDomainWithoutDuplicates_radix(t *testing.T) { // TODO:
 	upstreams := []string{"[/example.com/]1.1.1.1", "[/example.org/]1.1.1.1"}
 	config, err := ParseUpstreamsConfig(
 		upstreams,
@@ -44,6 +45,7 @@ func TestGetUpstreamsForDomainWithoutDuplicates(t *testing.T) {
 			Timeout:            1 * time.Second,
 		},
 	)
+	config.GetUpstreamsMode = GetUpstreamsFromRadixTree
 	assert.NoError(t, err)
 	assert.Len(t, config.Upstreams, 0)
 	assert.Len(t, config.DomainReservedUpstreams, 2)
@@ -55,7 +57,7 @@ func TestGetUpstreamsForDomainWithoutDuplicates(t *testing.T) {
 	assert.Same(t, u1, u2)
 }
 
-func TestGetUpstreamsForDomain_wildcards(t *testing.T) {
+func TestGetUpstreamsForDomain_radix_wildcards(t *testing.T) {
 	conf := []string{
 		"0.0.0.1",
 		"[/a.x/]0.0.0.2",
@@ -67,6 +69,7 @@ func TestGetUpstreamsForDomain_wildcards(t *testing.T) {
 	}
 
 	uconf, err := ParseUpstreamsConfig(conf, nil)
+	uconf.GetUpstreamsMode = GetUpstreamsFromRadixTree
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -118,7 +121,7 @@ func TestGetUpstreamsForDomain_wildcards(t *testing.T) {
 	}
 }
 
-func TestGetUpstreamsForDomain_sub_wildcards(t *testing.T) {
+func TestGetUpstreamsForDomain_radix_sub_wildcards(t *testing.T) {
 	conf := []string{
 		"0.0.0.1",
 		"[/a.x/]0.0.0.2",
@@ -127,6 +130,7 @@ func TestGetUpstreamsForDomain_sub_wildcards(t *testing.T) {
 	}
 
 	uconf, err := ParseUpstreamsConfig(conf, nil)
+	uconf.GetUpstreamsMode = GetUpstreamsFromRadixTree
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -158,7 +162,7 @@ func TestGetUpstreamsForDomain_sub_wildcards(t *testing.T) {
 	}
 }
 
-func TestGetUpstreamsForDomain_default_wildcards(t *testing.T) {
+func TestGetUpstreamsForDomain_radix_default_wildcards(t *testing.T) {
 	conf := []string{
 		"127.0.0.1:5301",
 		"[/example.org/]127.0.0.1:5302",
@@ -170,6 +174,7 @@ func TestGetUpstreamsForDomain_default_wildcards(t *testing.T) {
 	}
 
 	uconf, err := ParseUpstreamsConfig(conf, nil)
+	uconf.GetUpstreamsMode = GetUpstreamsFromRadixTree
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -209,7 +214,7 @@ func TestGetUpstreamsForDomain_default_wildcards(t *testing.T) {
 	}
 }
 
-func BenchmarkGetUpstreamsForDomain(b *testing.B) {
+func BenchmarkGetUpstreamsForDomain_radix(b *testing.B) {
 	upstreams := []string{
 		"[/google.com/local/]4.3.2.1",
 		"[/www.google.com//]1.2.3.4",
@@ -227,6 +232,7 @@ func BenchmarkGetUpstreamsForDomain(b *testing.B) {
 			Timeout:            1 * time.Second,
 		},
 	)
+	config.GetUpstreamsMode = GetUpstreamsFromRadixTree
 
 	for i := 0; i < b.N; i++ {
 		assertUpstreamsForDomain(b, config, "www.google.com.", []string{"1.2.3.4:53", "tls://1.1.1.1:853"})
@@ -236,18 +242,5 @@ func BenchmarkGetUpstreamsForDomain(b *testing.B) {
 		assertUpstreamsForDomain(b, config, "maps.google.com.", []string{})
 		assertUpstreamsForDomain(b, config, "zxc-abc.example.org.", []string{"127.0.0.1:5305"})
 		assertUpstreamsForDomain(b, config, "zxc.abc.example.org.", []string{"127.0.0.1:5306"})
-	}
-}
-
-// assertUpstreamsForDomain checks the addresses of the specified domain
-// upstreams and their number.
-func assertUpstreamsForDomain(t testing.TB, config *UpstreamConfig, domain string, address []string) {
-	t.Helper()
-
-	u := config.getUpstreamsForDomain(domain)
-	require.Len(t, u, len(address))
-
-	for i, up := range u {
-		assert.Equalf(t, address[i], up.Address(), "bad upstream at index %d", i)
 	}
 }

@@ -9,6 +9,13 @@ import (
 	"github.com/AdguardTeam/golibs/stringutil"
 
 	"github.com/AdguardTeam/dnsproxy/upstream"
+	"github.com/armon/go-radix"
+)
+
+const (
+	GetUpstreamsDefault = iota
+	GetUpstreamsFromMap
+	GetUpstreamsFromRadixTree
 )
 
 // UpstreamConfig is a wrapper for list of default upstreams and map of reserved domains and corresponding upstreams
@@ -17,6 +24,8 @@ type UpstreamConfig struct {
 	DomainReservedUpstreams  map[string][]upstream.Upstream // map of reserved domains and lists of corresponding upstreams
 	SpecifiedDomainUpstreams map[string][]upstream.Upstream // map of excluded domains and lists of corresponding upstreams
 	SubdomainExclusions      *stringutil.Set                // set of domains with sub-domains exclusions
+	UpstreamsRadixTree       *radix.Tree
+	GetUpstreamsMode         int
 }
 
 // ParseUpstreamsConfig returns UpstreamConfig and error if upstreams configuration is invalid
@@ -48,6 +57,7 @@ func ParseUpstreamsConfig(upstreamConfig []string, options *upstream.Options) (*
 	specifiedDomainUpstreams := map[string][]upstream.Upstream{}
 	subdomainsOnlyUpstreams := map[string][]upstream.Upstream{}
 	subdomainsOnlyExclusions := stringutil.NewSet()
+	upstreamsRadixTree := radix.New()
 
 	for i, l := range upstreamConfig {
 		u, hosts, err := parseUpstreamLine(l)
@@ -58,6 +68,8 @@ func ParseUpstreamsConfig(upstreamConfig []string, options *upstream.Options) (*
 		// # excludes more specific domain from reserved upstreams querying
 		if u == "#" && len(hosts) > 0 {
 			for _, host := range hosts {
+				upstreamsRadixTree.Insert(reverseString(strings.TrimPrefix(host, "*")), nil)
+
 				if strings.HasPrefix(host, "*.") {
 					host = host[len("*."):]
 
@@ -103,6 +115,13 @@ func ParseUpstreamsConfig(upstreamConfig []string, options *upstream.Options) (*
 			}
 
 			for _, host := range hosts {
+				v, ok := upstreamsRadixTree.Get(reverseString(strings.TrimPrefix(host, "*")))
+				if !ok {
+					v = make([]upstream.Upstream, 0, 1)
+				}
+				v = append(v.([]upstream.Upstream), dnsUpstream)
+				upstreamsRadixTree.Insert(reverseString(strings.TrimPrefix(host, "*")), v)
+
 				if strings.HasPrefix(host, "*.") {
 					host = host[len("*."):]
 
@@ -138,6 +157,7 @@ func ParseUpstreamsConfig(upstreamConfig []string, options *upstream.Options) (*
 		DomainReservedUpstreams:  domainReservedUpstreams,
 		SpecifiedDomainUpstreams: specifiedDomainUpstreams,
 		SubdomainExclusions:      subdomainsOnlyExclusions,
+		UpstreamsRadixTree:       upstreamsRadixTree,
 	}, nil
 }
 
@@ -185,6 +205,19 @@ func parseUpstreamLine(l string) (string, []string, error) {
 // If we are looking for domain www.host.com, this method will return value of www.host.com key
 // If more specific domain value is nil, it means that domain was excluded and should be exchanged with default upstreams
 func (uc *UpstreamConfig) getUpstreamsForDomain(host string) (ups []upstream.Upstream) {
+	switch uc.GetUpstreamsMode {
+	case GetUpstreamsDefault:
+		return uc.getUpstreamsFromMap(host)
+	case GetUpstreamsFromMap:
+		return uc.getUpstreamsFromMap(host)
+	case GetUpstreamsFromRadixTree:
+		return uc.getUpstreamsFromRadixTree(host)
+	default:
+		return uc.Upstreams
+	}
+}
+
+func (uc *UpstreamConfig) getUpstreamsFromMap(host string) (ups []upstream.Upstream) {
 	if len(uc.DomainReservedUpstreams) == 0 {
 		return uc.Upstreams
 	}
@@ -240,4 +273,38 @@ func (uc *UpstreamConfig) getUpstreamsForDomain(host string) (ups []upstream.Ups
 	}
 
 	return uc.Upstreams
+}
+
+func (uc *UpstreamConfig) getUpstreamsFromRadixTree(host string) (ups []upstream.Upstream) {
+	if len(uc.DomainReservedUpstreams) == 0 {
+		return uc.Upstreams
+	}
+
+	dotsCount := strings.Count(host, ".")
+	if dotsCount < 2 {
+		host = UnqualifiedNames
+	} else {
+		host = strings.ToLower(host)
+	}
+
+	if _, v, ok := uc.UpstreamsRadixTree.LongestPrefix(reverseString(host)); ok {
+		switch t := v.(type) {
+		case []upstream.Upstream:
+			if len(t) > 0 {
+				return t
+			}
+		case nil:
+			return uc.Upstreams
+		}
+	}
+
+	return uc.Upstreams
+}
+
+func reverseString(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
 }

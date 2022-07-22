@@ -19,6 +19,9 @@ github.com/ameshkov/dnscrypt/v2/xsecretbox
 # github.com/ameshkov/dnsstamps v1.0.3
 ## explicit
 github.com/ameshkov/dnsstamps
+# github.com/armon/go-radix v1.0.0
+## explicit
+github.com/armon/go-radix
 # github.com/beefsack/go-rate v0.0.0-20200827232406-6cde80facd47
 ## explicit
 github.com/beefsack/go-rate
